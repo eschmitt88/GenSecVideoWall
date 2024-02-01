@@ -1,5 +1,4 @@
-README
-VideoWall Application
+GenSec Video Wall
 ====================
 
 This application is a Python-based project that uses PyQt5 for its GUI and several other libraries for its functionality. The main class in this application is `VideoWall`.
@@ -39,5 +38,3 @@ How to Run
 ----------
 
 To run this application, you need to have Python installed on your machine along with the libraries mentioned above. You can then run the `app.py` file using the Python interpreter.
-
-Please note that this is a basic overview based on the provided code snippet. For more detailed information, please refer to the comments and documentation in the source code.
