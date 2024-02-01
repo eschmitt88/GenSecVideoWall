@@ -15,16 +15,12 @@
 
 pyautogui
 Pillow
-gspread
-oauth2client
 keyboard
 numpy
 opencv-python
 pytesseract
 pynput
 pytest
-fuzzywuzzy
-python-Levenshtein
 PyQt5
 pywin32
 dependencies/tesserocr-2.6.0-cp311-cp311-win_amd64.whl
