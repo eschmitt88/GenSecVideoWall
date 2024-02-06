@@ -117,7 +117,7 @@ class VideoWall(QtWidgets.QWidget):
                 # self.update_display(screenshot)
                 self.current_display = (self.current_display + 1) % self.num_displays
 
-                # Perform click actions here
+                # Perform click actions here to click on the screen, which will progress to the next display
                 # time.sleep(self.interval)
                 # self.mouse.click(Button.left)
                 # pyautogui.click()
