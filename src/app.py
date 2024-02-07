@@ -7,27 +7,47 @@ from pynput.mouse import Controller, Button
 import threading
 import sys
 from PyQt5 import QtWidgets, QtGui
-from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, pyqtSlot, QTimer, QObject
+from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, pyqtSlot, QTimer, QObject, QCoreApplication
 import win32con
 import win32api
+from src.camera_id import screenshot_to_ID
+from src.utils.FlowLayout import FlowLayout
+from src.utils.best_fit import best_fit
 
 
 class VideoWall(QtWidgets.QWidget):
-    display_updated = pyqtSignal(QtGui.QImage, int)
+    create_display_signal = pyqtSignal(str)
+    setup_mini_displays_signal = pyqtSignal()
+    update_mini_displays_signal = pyqtSignal()
+
+    class DisplayObject(QtWidgets.QLabel):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+            self.setStyleSheet("border: 1px solid black;")
+            self.setAlignment(Qt.AlignCenter)
+            self.setPixmap(QtGui.QPixmap.fromImage(QtGui.QImage(192, 108, QtGui.QImage.Format_RGB888)))
+
+        @pyqtSlot(QtGui.QImage)
+        def update_image(self, screenshot):
+            target_width = self.width()-2
+            target_height = self.height()-2
+            screenshot = screenshot.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.setPixmap(QtGui.QPixmap.fromImage(screenshot))
+            self.update()
 
     def __init__(self):
         super(VideoWall, self).__init__()
 
-        self.num_displays = 9
         self.is_clicking = False
         self.thread = None
         self.mutex = threading.Lock()
-        self.current_display = 0
-        self.screenshot_pixmap = None
-        scale_factor = 0.9
-        self.target_width = int(1920 * scale_factor)
-        self.target_height = int(1080 * scale_factor)
+        self.target_width = 1900
+        self.target_height = 970
         self.interval = 0.03
+        self.displays = {}
+        self.main_camera_id = None
+        self.main_display = self.DisplayObject()
 
         self.initUI()
 
@@ -38,47 +58,73 @@ class VideoWall(QtWidgets.QWidget):
 
         keyboard.add_hotkey(self.start_hotkey, self.start_clicks)
         keyboard.add_hotkey(self.stop_hotkey, self.stop_clicks)
-        keyboard.add_hotkey(self.increase_hotkey, self.increase_displays)
-        keyboard.add_hotkey(self.decrease_hotkey, self.decrease_displays)
+        keyboard.add_hotkey(self.increase_hotkey, self.next_camera)
+        keyboard.add_hotkey(self.decrease_hotkey, self.prev_camera)
 
     def initUI(self):
         self.setGeometry(1930, 35, self.target_width, self.target_height)
         self.setWindowTitle('GenSec Video Wall')
+        self.setup_top_level()
 
-        self.setLayout(QtWidgets.QGridLayout())
-        self.setup_displays()
-
-        self.display_updated.connect(self.update_display)
+        self.create_display_signal.connect(self.create_display)
+        self.setup_mini_displays_signal.connect(self.setup_mini_displays)
+        self.update_mini_displays_signal.connect(self.update_mini_displays)
 
         self.show()
 
+        self.right_shape = (self.right_frame.width(), self.right_frame.height())
+
         self.mouse = Controller()
 
-    @pyqtSlot()
-    def setup_displays_in_main_thread(self):
-        self.setup_displays()
+    def setup_top_level(self):
+        self.setLayout(QtWidgets.QGridLayout())
+        self.layout().setContentsMargins(0, 0, 0, 0)
+        self.layout().setSpacing(0)
+        self.layout().setColumnStretch(0, 3)
+        self.layout().setColumnStretch(1, 1)
+        self.setStyleSheet("background-color: black;")
 
-    def setup_displays(self):
+        # create left frame
+        self.layout().addWidget(self.main_display, 0, 0)
+
+        # create right frame
+        self.right_frame = QtWidgets.QFrame(self)
+        self.right_frame.setStyleSheet("border: 1px solid black;")
+        self.right_frame.setLayout(QtWidgets.QGridLayout())
+        self.right_frame.layout().setContentsMargins(0, 0, 0, 0)
+        self.right_frame.layout().setSpacing(0)
+        self.layout().addWidget(self.right_frame, 0, 1)
+
+    @pyqtSlot()
+    def setup_mini_displays(self):
         # Clear the layouts and widgets
-        for i in reversed(range(self.layout().count())):
-            self.layout().itemAt(i).widget().setParent(None)
+        for i in reversed(range(self.right_frame.layout().count())):
+            self.right_frame.layout().itemAt(i).widget().setParent(None)
 
         # Calculate the number of rows and columns for the grid layout
-        num_rows = int(math.sqrt(self.num_displays))
-        num_cols = math.ceil(self.num_displays / num_rows)
-        widget_width = int((self.target_width-30) / num_cols)
-        widget_height = int((self.target_height-30) / num_rows)
+        (width, height), (cols, rows) = best_fit(self.right_shape, (1920, 1080), len(self.displays))
+        widget_width = int(width)
+        widget_height = int(height)
 
         # Create display widgets and add them to the layout
-        for i in range(self.num_displays):
-            display_widget = QtWidgets.QLabel(self)
-            display_widget.setAlignment(Qt.AlignCenter)
-            display_widget.setStyleSheet("border: 1px solid black;")
-            display_widget.setFixedSize(widget_width, widget_height)
-            self.layout().addWidget(display_widget, i // num_cols, i % num_cols)
+        keys = sorted(self.displays.keys())
+        for i, key in enumerate(keys):
+            self.displays[key].setFixedSize(widget_width, widget_height)
+            r = i // cols
+            c = i % cols
+            self.right_frame.layout().addWidget(self.displays[key], r, c)
 
         # Update the layout
-        self.layout().update()
+        self.right_frame.layout().update()
+
+    # @pyqtSlot(QtGui.QImage)
+    def update_main_display(self, screenshot):
+        self.main_display.update_image(screenshot)
+
+    @pyqtSlot(str)
+    def create_display(self, display_id):
+        self.displays[display_id] = self.DisplayObject()
+        self.setup_mini_displays_signal.emit()
 
     def start_clicks(self):
         if not self.is_clicking:
@@ -91,66 +137,80 @@ class VideoWall(QtWidgets.QWidget):
             self.is_clicking = False
             self.thread.join()
 
-    def increase_displays(self):
-        self.num_displays += 1
-        QTimer.singleShot(0, self.setup_displays_in_main_thread)
+    @pyqtSlot()
+    def update_mini_displays(self):
+        for key in self.displays:
+            if key == self.main_camera_id:
+                self.displays[key].setStyleSheet("border: 4px solid limegreen;")
+            else:
+                self.displays[key].setStyleSheet("border: 1px solid black;")
 
-    def decrease_displays(self):
-        if self.num_displays > 1:
-            self.num_displays -= 1
-            QTimer.singleShot(0, self.setup_displays_in_main_thread)
+    def next_camera(self):
+        keys = sorted(self.displays.keys())
+        if self.main_camera_id is None:
+            self.main_camera_id = keys[0]
+        else:
+            index = keys.index(self.main_camera_id)
+            index = (index + 1) % len(keys)
+            self.main_camera_id = keys[index]
+            self.update_mini_displays_signal.emit()
+
+    def prev_camera(self):
+        keys = sorted(self.displays.keys())
+        if self.main_camera_id is None:
+            self.main_camera_id = keys[0]
+        else:
+            index = keys.index(self.main_camera_id)
+            index = (index - 1) % len(keys)
+            self.main_camera_id = keys[index]
+            self.update_mini_displays_signal.emit()
 
     def run_clicks(self):
         while self.is_clicking:
             with self.mutex:
-                # For demonstration, take a screenshot and display it
+                # Take a screenshot and display it
                 screenshot = pyautogui.screenshot()
-                print('screenshot')
+
+                # Extract the camera number from the screenshot
+                try:
+                    current_id = screenshot_to_ID(screenshot, typ='str')
+                except Exception as e:
+                    print(e)
+                    time.sleep(0.2)
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0) # Press the left mouse button
+                    time.sleep(self.interval / 2) # Wait half the interval before releasing the button
+                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0) # Release the left mouse button
+                    time.sleep(self.interval / 2) # Wait the other half of the interval before performing the next click
+                    continue
+
+                if current_id not in self.displays:
+                    self.create_display_signal.emit(current_id)
+                    print(f"New camera found: {current_id}")
+                    if self.main_camera_id is None:
+                        self.main_camera_id = current_id
+                        self.update_mini_displays_signal.emit()
 
                 screenshot = screenshot.convert("RGB")
-
-                # screenshot = screenshot.resize((target_width, target_height), Image.NEAREST)
                 screenshot = QtGui.QImage(screenshot.tobytes(), screenshot.width, screenshot.height, QtGui.QImage.Format_RGB888)
 
-                i = int(self.current_display)
-                self.display_updated.emit(screenshot, i)
-                # self.update_display(screenshot)
-                self.current_display = (self.current_display + 1) % self.num_displays
+                if current_id == self.main_camera_id:
+                    self.update_main_display(screenshot)
+
+                self.displays[current_id].update_image(screenshot)
+                self.layout().update()
 
                 # Perform click actions here to click on the screen, which will progress to the next display
-                # time.sleep(self.interval)
-                # self.mouse.click(Button.left)
-                # pyautogui.click()
                 win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0) # Press the left mouse button
                 time.sleep(self.interval / 2) # Wait half the interval before releasing the button
                 win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0) # Release the left mouse button
                 time.sleep(self.interval / 2) # Wait the other half of the interval before performing the next click
-                print('click')
-
-                # time.sleep(self.interval)
-
-    @pyqtSlot(QtGui.QImage, int)
-    def update_display(self, screenshot, display_index):
-        layout_item = self.layout().itemAt(display_index)
-
-        if layout_item is not None:
-            label = layout_item.widget()
-
-            if label is not None:
-                # Calculate the target size while preserving the aspect ratio
-                target_width = label.width()
-                target_height = label.height()
-
-                screenshot = screenshot.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-                label.setPixmap(QtGui.QPixmap.fromImage(screenshot))
-                label.update()
 
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
     ex = VideoWall()
     sys.exit(app.exec_())
+
 
 if __name__ == '__main__':
     main()
