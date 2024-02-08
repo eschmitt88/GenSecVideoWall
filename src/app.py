@@ -14,6 +14,7 @@ from src.camera_id import screenshot_to_ID, write_id_to_image
 from src.utils.FlowLayout import FlowLayout
 from src.utils.best_fit import best_fit
 import numpy as np
+from utils.screenshot import screenshot_background_window as get_screenshot
 
 
 class VideoWall(QtWidgets.QWidget):
@@ -201,7 +202,8 @@ class VideoWall(QtWidgets.QWidget):
             with self.mutex:
                 self.n_iterations += 1
                 # Take a screenshot and display it
-                screenshot = pyautogui.screenshot()
+                # screenshot = pyautogui.screenshot()
+                screenshot = get_screenshot()
                 screenshot_np = np.array(screenshot)
 
                 # Extract the camera number from the screenshot
@@ -248,13 +250,13 @@ class VideoWall(QtWidgets.QWidget):
 
     def reset(self):
         self.stop_clicks()
+        time.sleep(0.1)
         self.displays = {}
         self.shown_displays = []
         self.main_camera_id = None
         self.main_display.setPixmap(QtGui.QPixmap.fromImage(QtGui.QImage(160, 90, QtGui.QImage.Format_RGB888)))
         self.n_iterations = 0
         self.average_span = 10
-        self.setup_mini_displays_signal.emit()
 
 
 def main():
