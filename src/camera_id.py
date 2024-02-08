@@ -5,7 +5,7 @@ import time
 import numpy as np
 
 tesser_api = PyTessBaseAPI(path='resources/tessdata', lang='eng', psm=6, oem=3)
-id_box = (203, 1028, 60, 42)
+id_box = (215, 1028, 50, 43)
 
 
 def crop_image(image, box):
