@@ -49,6 +49,16 @@ def write_id_to_image(image, string):
     return image
 
 
+def write_box_to_image(image, box=id_box, color=(255, 255, 255, 150), line_width=1):
+    """Write a bounding box onto the image. Box is (x, y, w, h)"""
+    if isinstance(image, Image.Image):
+        image = np.array(image)
+    x, y, w, h = box
+    cv2.rectangle(image, (x, y), (x+w, y+h), color, line_width)
+    return image
+    
+
+
 if __name__ == "__main__":
     image = cv2.imread("tests/examples/camera_01.png")
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
