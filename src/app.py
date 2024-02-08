@@ -129,28 +129,30 @@ class VideoWall(QtWidgets.QWidget):
         for i in reversed(range(self.right_frame.layout().count())):
             self.right_frame.layout().itemAt(i).widget().setParent(None)
 
-        # Prune the displays to only show the most updated ones
-        self.calc_quantile_span()
-        self.shown_displays = []
-        keys = sorted(self.displays.keys())
-        for key in keys:
-            if self.displays[key].update_span_filt < self.average_span_tolerance * self.average_span:
-                self.shown_displays.append(key)
+        if len(self.displays) >= 1:
+            # Prune the displays to only show the most updated ones
+            self.calc_quantile_span()
+            self.shown_displays = []
+            keys = sorted(self.displays.keys())
+            for key in keys:
+                if self.displays[key].update_span_filt < self.average_span_tolerance * self.average_span:
+                    self.shown_displays.append(key)
 
-        # Calculate the number of rows and columns for the grid layout
-        (width, height), (cols, rows) = best_fit(self.right_shape, (1920, 1080), len(self.shown_displays))
-        widget_width = int(width)
-        widget_height = int(height)
+            if len(self.shown_displays) >= 1:
+                # Calculate the number of rows and columns for the grid layout
+                (width, height), (cols, rows) = best_fit(self.right_shape, (1920, 1080), len(self.shown_displays))
+                widget_width = int(width)
+                widget_height = int(height)
 
-        # Create display widgets and add them to the layout
-        for i, key in enumerate(self.shown_displays):
-            self.displays[key].setFixedSize(widget_width, widget_height)
-            r = i // cols
-            c = i % cols
-            self.right_frame.layout().addWidget(self.displays[key], r, c)
+                # Create display widgets and add them to the layout
+                for i, key in enumerate(self.shown_displays):
+                    self.displays[key].setFixedSize(widget_width, widget_height)
+                    r = i // cols
+                    c = i % cols
+                    self.right_frame.layout().addWidget(self.displays[key], r, c)
 
-        # Update the layout
-        self.right_frame.layout().update()
+                # Update the layout
+                self.right_frame.layout().update()
 
     # @pyqtSlot(QtGui.QImage)
     def update_main_display(self, screenshot):
