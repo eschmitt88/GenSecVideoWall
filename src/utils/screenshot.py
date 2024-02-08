@@ -31,7 +31,7 @@ def screenshot_background_window(window_name='PAYDAY 2'):
 
     # Change the # in the line below depending on results
     result = windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 2)
-    print(result)
+    # print(result)
 
     bmpinfo = saveBitMap.GetInfo()
     bmpstr = saveBitMap.GetBitmapBits(True)

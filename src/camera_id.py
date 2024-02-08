@@ -38,14 +38,25 @@ def screenshot_to_ID(image, typ='int', show=False):
     return id_from_text(OCR_image(crop_image(image, id_box), show=show), typ=typ)
 
 
-def write_id_to_image(image, string):
+def write_id_to_image(image, string, color=(255, 255, 255)):
     """Write the string to the image in the upper left."""
     if isinstance(image, Image.Image):
         image = np.array(image)
-    font_height = int(image.shape[0] / 5)
+    text_bot_loc = int(image.shape[0] / 5)
     fscale = image.shape[0] / 150
     line_width = int(image.shape[0] / 50)
-    cv2.putText(image, string, (0, font_height), cv2.FONT_HERSHEY_DUPLEX, fscale, (255, 255, 255), line_width)
+    cv2.putText(image, string, (0, text_bot_loc), cv2.FONT_HERSHEY_DUPLEX, fscale, color, line_width)
+    return image
+
+
+def write_details_to_image(image, string, color=(255, 255, 255)):
+    """Write the string to the image in the lower left."""
+    if isinstance(image, Image.Image):
+        image = np.array(image)
+    text_bot_loc = int(image.shape[0] - image.shape[0] / 6)
+    fscale = image.shape[0] / 250
+    line_width = int(image.shape[0] / 200)
+    cv2.putText(image, string, (0, text_bot_loc), cv2.FONT_HERSHEY_DUPLEX, fscale, color, line_width)
     return image
 
 
@@ -58,7 +69,6 @@ def write_box_to_image(image, box=id_box, color=(255, 255, 255, 150), line_width
     return image
     
 
-
 if __name__ == "__main__":
     image = cv2.imread("tests/examples/camera_01.png")
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -68,6 +78,19 @@ if __name__ == "__main__":
 
     image = cv2.imread("tests/examples/camera_45.png")
     image = write_id_to_image(image, 'Camera 45')
-    cv2.imshow('labeled image', image)
+    cv2.imshow('labeled image', cv2.resize(image, (0, 0), fx=0.5, fy=0.5))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    image = cv2.imread("tests/examples/camera_45.png")
+    image = write_box_to_image(image)
+    cv2.imshow('boxed image', cv2.resize(image, (0, 0), fx=0.5, fy=0.5))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    image = cv2.imread("tests/examples/camera_45.png")
+    image = write_details_to_image(image, 'mean latency: 3.1123123')
+    # show image scaled by 0.5
+    cv2.imshow('details image', cv2.resize(image, (0, 0), fx=0.5, fy=0.5))
     cv2.waitKey(0)
     cv2.destroyAllWindows()
