@@ -10,7 +10,7 @@ from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, pyqtSlot, QTimer, QObject, QCoreApplication
 import win32con
 import win32api
-from src.camera_id import screenshot_to_ID, write_id_to_image
+from src.camera_id import screenshot_to_ID, write_id_to_image, write_details_to_image, write_box_to_image
 from src.utils.FlowLayout import FlowLayout
 from src.utils.best_fit import best_fit
 import numpy as np
@@ -35,18 +35,25 @@ class VideoWall(QtWidgets.QWidget):
             self.update_span_filt = 10
 
         def update_image(self, screenshot):
-            target_width = self.width()-2
-            target_height = self.height()-2
+            target_width = self.width() - 2
+            target_height = self.height() - 2
             screenshot = screenshot.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.setPixmap(QtGui.QPixmap.fromImage(screenshot))
             self.update()
             self.n_updates += 1
             self.update_span = time.time() - self.last_update
-            self.update_span_filt = 0.9 * self.update_span_filt + 0.1 * self.update_span
+            self.update_span_filt = 0.7 * self.update_span_filt + 0.3 * self.update_span
             self.last_update = time.time()
 
+        def update_image_only(self, screenshot):
+            target_width = self.width() - 2
+            target_height = self.height() - 2
+            screenshot = screenshot.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.setPixmap(QtGui.QPixmap.fromImage(screenshot))
+            self.update()
+
         def resizeEvent(self, event):
-            self.update_image(self.pixmap().toImage())
+            self.update_image_only(self.pixmap().toImage())
 
     def __init__(self):
         super(VideoWall, self).__init__()
@@ -63,6 +70,7 @@ class VideoWall(QtWidgets.QWidget):
         self.main_display = self.DisplayObject()
         self.n_iterations = 0
         self.average_span = 10
+        self.average_span_tolerance = 3
 
         self.initUI()
 
@@ -122,11 +130,11 @@ class VideoWall(QtWidgets.QWidget):
             self.right_frame.layout().itemAt(i).widget().setParent(None)
 
         # Prune the displays to only show the most updated ones
-        self.calc_average_span()
+        self.calc_quantile_span()
         self.shown_displays = []
         keys = sorted(self.displays.keys())
         for key in keys:
-            if self.displays[key].update_span_filt < 1.1*self.average_span:
+            if self.displays[key].update_span_filt < self.average_span_tolerance * self.average_span:
                 self.shown_displays.append(key)
 
         # Calculate the number of rows and columns for the grid layout
@@ -156,6 +164,8 @@ class VideoWall(QtWidgets.QWidget):
     def start_clicks(self):
         if not self.is_clicking:
             self.is_clicking = True
+            for key in self.displays:
+                self.displays[key].last_update = time.time() + 1
             self.thread = threading.Thread(target=self.run_clicks)
             self.thread.start()
 
@@ -175,7 +185,10 @@ class VideoWall(QtWidgets.QWidget):
     def next_camera(self):
         keys = self.shown_displays
         if self.main_camera_id is None:
-            self.main_camera_id = keys[0]
+            try:
+                self.main_camera_id = keys[0]
+            except:
+                pass
         else:
             index = keys.index(self.main_camera_id)
             index = (index + 1) % len(keys)
@@ -186,7 +199,10 @@ class VideoWall(QtWidgets.QWidget):
     def prev_camera(self):
         keys = self.shown_displays
         if self.main_camera_id is None:
-            self.main_camera_id = keys[0]
+            try:
+                self.main_camera_id = keys[0]
+            except:
+                pass
         else:
             index = keys.index(self.main_camera_id)
             index = (index - 1) % len(keys)
@@ -197,12 +213,21 @@ class VideoWall(QtWidgets.QWidget):
     def calc_average_span(self):
         self.average_span = np.mean([self.displays[key].update_span_filt for key in self.displays])
 
+    def calc_quantile_span(self, q=0.3):
+        self.average_span = np.quantile([self.displays[key].update_span_filt for key in self.displays], q)
+
+    def click(self):
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        time.sleep(self.interval / 2)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        time.sleep(self.interval / 2)
+
     def run_clicks(self):
         while self.is_clicking:
             with self.mutex:
                 self.n_iterations += 1
-                # Take a screenshot and display it
-                # screenshot = pyautogui.screenshot()
+
+                # Take a screenshot
                 screenshot = get_screenshot()
                 screenshot_np = np.array(screenshot)
 
@@ -211,42 +236,41 @@ class VideoWall(QtWidgets.QWidget):
                     current_id = screenshot_to_ID(screenshot, typ='str')
                 except Exception as e:
                     print(e)
-                    time.sleep(0.2)
-                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0) # Press the left mouse button
-                    time.sleep(self.interval / 2) # Wait half the interval before releasing the button
-                    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0) # Release the left mouse button
-                    time.sleep(self.interval / 2) # Wait the other half of the interval before performing the next click
+                    time.sleep(0.05)
+                    self.click()
                     continue
 
                 # If the camera is not already in the list of displays, add it
-                if current_id not in self.displays and self.n_iterations < 1000:
+                if self.n_iterations < 1000 and current_id not in self.displays:
                     self.create_display_signal.emit(current_id)
                     print(f"New camera found: {current_id}")
                     if self.main_camera_id is None:
                         self.main_camera_id = current_id
                         self.update_mini_displays_signal.emit()
 
-                # prune displays every 100 iterations
-                if self.n_iterations % 100 == 0:
+                # prune/unprune displays every 100 iterations
+                if self.n_iterations % 30 == 0:
                     self.setup_mini_displays_signal.emit()
 
                 # Convert the screenshot to a QImage and update the relevant display(s)
                 # Main display
                 if current_id == self.main_camera_id:
-                    screenshot = screenshot.convert("RGB")
-                    screenshot = QtGui.QImage(screenshot.tobytes(), screenshot.width, screenshot.height, QtGui.QImage.Format_RGB888)
-                    self.update_main_display(screenshot)
+                    main_screenshot = write_box_to_image(screenshot_np, color=(255, 0, 0, 255), line_width=2)
+                    main_screenshot = Image.fromarray(main_screenshot)
+                    main_screenshot = QtGui.QImage(main_screenshot.tobytes(), main_screenshot.width, main_screenshot.height, QtGui.QImage.Format_RGB888)
+                    self.update_main_display(main_screenshot)
                 # Mini display
-                screenshot_np = write_id_to_image(screenshot_np, current_id)
-                screenshot_PIL = Image.fromarray(screenshot_np)
-                screenshot = QtGui.QImage(screenshot_PIL.tobytes(), screenshot_PIL.width, screenshot_PIL.height, QtGui.QImage.Format_RGB888)
-                self.displays[current_id].update_image(screenshot)
+                if current_id in self.displays:
+                    side_screenshot = write_id_to_image(screenshot_np, current_id)
+                    side_screenshot = write_details_to_image(side_screenshot, f"Latency: {self.displays[current_id].update_span_filt:.2f}")
+                    side_screenshot = Image.fromarray(side_screenshot)
+                    side_screenshot = QtGui.QImage(side_screenshot.tobytes(), side_screenshot.width, side_screenshot.height, QtGui.QImage.Format_RGB888)
+                    self.displays[current_id].update_image(side_screenshot)
+                else:
+                    print(f"Error: Camera {current_id} not in displays")
 
-                # Perform clicks, which will progress to the next display
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0) # Press the left mouse button
-                time.sleep(self.interval / 2)
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0) # Release the left mouse button
-                time.sleep(self.interval / 2)
+                # Perform click, which will progress to the next display
+                self.click()
 
     def reset(self):
         self.stop_clicks()
