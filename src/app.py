@@ -11,6 +11,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, pyqtSlot, QTimer, QObject,
 import win32con
 import win32api
 from src.camera_id import screenshot_to_ID, write_id_to_image, write_details_to_image, write_box_to_image
+from src.camera_id import id_box as camera_id_box
 from src.utils.FlowLayout import FlowLayout
 from src.utils.best_fit import best_fit
 import numpy as np
@@ -28,32 +29,57 @@ class VideoWall(QtWidgets.QWidget):
             self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
             self.setStyleSheet("border: 1px solid black;")
             self.setAlignment(Qt.AlignCenter)
-            self.setPixmap(QtGui.QPixmap.fromImage(QtGui.QImage(160, 90, QtGui.QImage.Format_RGB888)))
+            self.screenshot = np.zeros((160, 90, 3), dtype=np.uint8)
             self.last_update = time.time()
             self.n_updates = 0
             self.update_span = 0
             self.update_span_filt = 10
+            self.annotations = []
+            self.title = None
+            self.title_color = (255, 255, 255)
+            self.details = None
+            self.details_color = (255, 255, 255)
+            self.box = None
+            self.box_color = (255, 0, 0, 255)
+            self.update_image_only()
 
-        def update_image(self, screenshot):
-            target_width = self.width() - 2
-            target_height = self.height() - 2
-            screenshot = screenshot.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.setPixmap(QtGui.QPixmap.fromImage(screenshot))
-            self.update()
+        def update_image(self, screenshot=None):
             self.n_updates += 1
             self.update_span = time.time() - self.last_update
             self.update_span_filt = 0.7 * self.update_span_filt + 0.3 * self.update_span
             self.last_update = time.time()
+            self.update_image_only(screenshot)
 
-        def update_image_only(self, screenshot):
+        def update_image_only(self, screenshot=None):
+            if screenshot is not None:
+                self.screenshot = screenshot
+            else:
+                screenshot = self.screenshot
             target_width = self.width() - 2
             target_height = self.height() - 2
-            screenshot = screenshot.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.setPixmap(QtGui.QPixmap.fromImage(screenshot))
+            screenshot = self.annotate_image(screenshot, annotations=self.annotations)
+            screenshot = Image.fromarray(screenshot)
+            screenshot = QtGui.QImage(screenshot.tobytes(), screenshot.width, screenshot.height, QtGui.QImage.Format_RGB888)
+            screenshot_scaled = screenshot.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.setPixmap(QtGui.QPixmap.fromImage(screenshot_scaled))
             self.update()
 
+        def annotate_image(self, image_input, annotations=['title', 'details', 'box']):
+            """Annotate the image with the title, details, and box."""
+            image = image_input.copy()
+            if 'title' in annotations:
+                if self.title is not None:
+                    image = write_id_to_image(image, self.title, color=self.title_color)
+            if 'details' in annotations:
+                if self.details is not None:
+                    image = write_details_to_image(image, self.details, color=self.details_color)
+            if 'box' in annotations:
+                if self.box is not None:
+                    image = write_box_to_image(image, self.box, color=self.box_color, line_width=2)
+            return image
+
         def resizeEvent(self, event):
-            self.update_image_only(self.pixmap().toImage())
+            self.update_image_only(self.screenshot)
 
     def __init__(self):
         super(VideoWall, self).__init__()
@@ -68,6 +94,7 @@ class VideoWall(QtWidgets.QWidget):
         self.shown_displays = []
         self.main_camera_id = None
         self.main_display = self.DisplayObject()
+        self.main_display.annotations = ['box']
         self.n_iterations = 0
         self.average_span = 10
         self.average_span_tolerance = 3
@@ -87,6 +114,16 @@ class VideoWall(QtWidgets.QWidget):
         keyboard.add_hotkey('space', self.stop_clicks)
         keyboard.add_hotkey(self.reset_hotkey, self.reset)
 
+        # hotkeys for moving and resizing the camera_id_box
+        self.camera_id_box = camera_id_box
+        keyboard.add_hotkey('up', self.move_camera_id_box, args=(0, -1))
+        keyboard.add_hotkey('down', self.move_camera_id_box, args=(0, 1))
+        keyboard.add_hotkey('left', self.move_camera_id_box, args=(-1, 0))
+        keyboard.add_hotkey('right', self.move_camera_id_box, args=(1, 0))
+        keyboard.add_hotkey('shift+up', self.resize_camera_id_box, args=('up', 1))
+        keyboard.add_hotkey('shift+down', self.resize_camera_id_box, args=('up', -1))
+        keyboard.add_hotkey('shift+right', self.resize_camera_id_box, args=('right', 1))
+        keyboard.add_hotkey('shift+left', self.resize_camera_id_box, args=('right', -1))
 
     def initUI(self):
         self.setGeometry(1930, 35, self.target_width, self.target_height)
@@ -100,8 +137,6 @@ class VideoWall(QtWidgets.QWidget):
         self.show()
 
         self.right_shape = (self.right_frame.width(), self.right_frame.height())
-
-        self.mouse = Controller()
 
     def setup_top_level(self):
         self.setLayout(QtWidgets.QGridLayout())
@@ -154,13 +189,10 @@ class VideoWall(QtWidgets.QWidget):
                 # Update the layout
                 self.right_frame.layout().update()
 
-    # @pyqtSlot(QtGui.QImage)
-    def update_main_display(self, screenshot):
-        self.main_display.update_image(screenshot)
-
     @pyqtSlot(str)
     def create_display(self, display_id):
         self.displays[display_id] = self.DisplayObject()
+        self.displays[display_id].annotations = ['title', 'details']
         self.setup_mini_displays_signal.emit()
 
     def start_clicks(self):
@@ -192,11 +224,15 @@ class VideoWall(QtWidgets.QWidget):
             except:
                 pass
         else:
-            index = keys.index(self.main_camera_id)
-            index = (index + 1) % len(keys)
+            try:
+                index = keys.index(self.main_camera_id)
+                index = (index + 1) % len(keys)
+            except:
+                index = 0
             self.main_camera_id = keys[index]
             self.update_mini_displays_signal.emit()
-            self.main_display.update_image(self.displays[self.main_camera_id].pixmap().toImage())
+            self.main_display.box = self.camera_id_box
+            self.main_display.update_image(self.displays[self.main_camera_id].screenshot)
 
     def prev_camera(self):
         keys = self.shown_displays
@@ -206,11 +242,28 @@ class VideoWall(QtWidgets.QWidget):
             except:
                 pass
         else:
-            index = keys.index(self.main_camera_id)
-            index = (index - 1) % len(keys)
+            try:
+                index = keys.index(self.main_camera_id)
+                index = (index - 1) % len(keys)
+            except:
+                index = 0
             self.main_camera_id = keys[index]
             self.update_mini_displays_signal.emit()
-            self.main_display.update_image(self.displays[self.main_camera_id].pixmap().toImage())
+            self.main_display.box = self.camera_id_box
+            self.main_display.update_image(self.displays[self.main_camera_id].screenshot)
+
+    def move_camera_id_box(self, dx, dy):
+        self.camera_id_box = (self.camera_id_box[0] + dx, self.camera_id_box[1] + dy, self.camera_id_box[2], self.camera_id_box[3])
+
+    def resize_camera_id_box(self, side, dist=1):
+        if side == 'up':
+            self.camera_id_box = (self.camera_id_box[0], self.camera_id_box[1] - dist, self.camera_id_box[2], self.camera_id_box[3] + dist)
+        elif side == 'down':
+            self.camera_id_box = (self.camera_id_box[0], self.camera_id_box[1], self.camera_id_box[2], self.camera_id_box[3] + dist)
+        elif side == 'left':
+            self.camera_id_box = (self.camera_id_box[0] - dist, self.camera_id_box[1], self.camera_id_box[2] + dist, self.camera_id_box[3])
+        elif side == 'right':
+            self.camera_id_box = (self.camera_id_box[0], self.camera_id_box[1], self.camera_id_box[2] + dist, self.camera_id_box[3])
 
     def calc_average_span(self):
         self.average_span = np.mean([self.displays[key].update_span_filt for key in self.displays])
@@ -235,7 +288,7 @@ class VideoWall(QtWidgets.QWidget):
 
                 # Extract the camera number from the screenshot
                 try:
-                    current_id = screenshot_to_ID(screenshot, typ='str')
+                    current_id = screenshot_to_ID(screenshot_np, box=self.camera_id_box, typ='str')
                 except Exception as e:
                     print(e)
                     time.sleep(0.05)
@@ -250,24 +303,26 @@ class VideoWall(QtWidgets.QWidget):
                         self.main_camera_id = current_id
                         self.update_mini_displays_signal.emit()
 
-                # prune/unprune displays every 100 iterations
+                # prune/unprune displays every X iterations
                 if self.n_iterations % 30 == 0:
                     self.setup_mini_displays_signal.emit()
 
                 # Convert the screenshot to a QImage and update the relevant display(s)
                 # Main display
                 if current_id == self.main_camera_id:
-                    main_screenshot = write_box_to_image(screenshot_np, color=(255, 0, 0, 255), line_width=2)
-                    main_screenshot = Image.fromarray(main_screenshot)
-                    main_screenshot = QtGui.QImage(main_screenshot.tobytes(), main_screenshot.width, main_screenshot.height, QtGui.QImage.Format_RGB888)
-                    self.update_main_display(main_screenshot)
+                    self.main_display.box = self.camera_id_box
+                    self.main_display.update_image(screenshot_np)
+                elif self.n_iterations % 5 == 0:
+                    self.main_display.box = self.camera_id_box
+                    self.main_display.update_image_only()
                 # Mini display
                 if current_id in self.displays:
-                    side_screenshot = write_id_to_image(screenshot_np, current_id)
-                    side_screenshot = write_details_to_image(side_screenshot, f"Latency: {self.displays[current_id].update_span_filt:.2f}")
-                    side_screenshot = Image.fromarray(side_screenshot)
-                    side_screenshot = QtGui.QImage(side_screenshot.tobytes(), side_screenshot.width, side_screenshot.height, QtGui.QImage.Format_RGB888)
-                    self.displays[current_id].update_image(side_screenshot)
+                    # side_screenshot = write_id_to_image(screenshot_np, current_id)
+                    # side_screenshot = write_details_to_image(side_screenshot, f"Latency: {self.displays[current_id].update_span_filt:.2f}")
+                    # self.displays[current_id].update_image(side_screenshot)
+                    self.displays[current_id].title = current_id
+                    self.displays[current_id].details = f"Latency: {self.displays[current_id].update_span_filt:.2f}"
+                    self.displays[current_id].update_image(screenshot_np)
                 else:
                     print(f"Error: Camera {current_id} not in displays")
 
