@@ -19,9 +19,12 @@ from utils.screenshot import screenshot_background_window as get_screenshot
 
 
 class VideoWall(QtWidgets.QWidget):
-    create_display_signal = pyqtSignal(str)
+    create_display_signal = pyqtSignal(str, np.ndarray)
     setup_mini_displays_signal = pyqtSignal()
     update_mini_displays_signal = pyqtSignal()
+    update_single_display_signal = pyqtSignal(str, np.ndarray)
+    update_main_display_signal = pyqtSignal(object)
+    update_main_display_image_only_signal = pyqtSignal(object)
 
     class DisplayObject(QtWidgets.QLabel):
         def __init__(self, parent=None):
@@ -45,10 +48,13 @@ class VideoWall(QtWidgets.QWidget):
 
         def update_image(self, screenshot=None):
             self.n_updates += 1
-            self.update_span = time.time() - self.last_update
-            self.update_span_filt = 0.7 * self.update_span_filt + 0.3 * self.update_span
-            self.last_update = time.time()
+            self.update_span_only()
             self.update_image_only(screenshot)
+            self.last_update = time.time()
+
+        def update_span_only(self):
+            self.update_span = time.time() - self.last_update
+            self.update_span_filt = 0.9 * self.update_span_filt + 0.1 * self.update_span
 
         def update_image_only(self, screenshot=None):
             if screenshot is not None:
@@ -94,18 +100,18 @@ class VideoWall(QtWidgets.QWidget):
         self.shown_displays = []
         self.main_camera_id = None
         self.main_display = self.DisplayObject()
-        self.main_display.annotations = ['box']
+        self.main_display.annotations = ['title', 'box']
         self.n_iterations = 0
         self.average_span = 10
         self.average_span_tolerance = 3
-
-        self.initUI()
 
         self.start_hotkey = '['
         self.stop_hotkey = ']'
         self.increase_hotkey = '='
         self.decrease_hotkey = '-'
         self.reset_hotkey = '0'
+
+        self.initUI()
 
         keyboard.add_hotkey(self.start_hotkey, self.start_clicks)
         keyboard.add_hotkey(self.stop_hotkey, self.stop_clicks)
@@ -133,6 +139,9 @@ class VideoWall(QtWidgets.QWidget):
         self.create_display_signal.connect(self.create_display)
         self.setup_mini_displays_signal.connect(self.setup_mini_displays)
         self.update_mini_displays_signal.connect(self.update_mini_displays)
+        self.update_single_display_signal.connect(self.update_single_display)
+        self.update_main_display_signal.connect(self.main_display_update_image)
+        self.update_main_display_image_only_signal.connect(self.main_display_update_image_only)
 
         self.show()
 
@@ -147,7 +156,27 @@ class VideoWall(QtWidgets.QWidget):
         self.setStyleSheet("background-color: black;")
 
         # create left frame
-        self.layout().addWidget(self.main_display, 0, 0)
+        self.left_frame = QtWidgets.QFrame(self)
+        self.left_frame.setLayout(QtWidgets.QVBoxLayout())
+        self.left_frame.layout().setContentsMargins(0, 0, 0, 0)
+        self.left_frame.layout().setSpacing(0)
+
+        # Create separate QLabel boxes for each hotkey label
+        self.legend = QtWidgets.QFrame(self)
+        self.legend.setLayout(QtWidgets.QHBoxLayout())
+        self.legend.layout().setSpacing(0)
+        self.legend.setStyleSheet("background-color: black; color: white;")
+        self.legend.layout().addWidget(QtWidgets.QLabel(f"Start Clicking: {self.start_hotkey}\nStop Clicking: {self.stop_hotkey}"))
+        self.legend.layout().addWidget(QtWidgets.QLabel(f"Focus Prev: {self.decrease_hotkey}\nFocus Next: {self.increase_hotkey}"))
+        self.legend.layout().addWidget(QtWidgets.QLabel(f"Reset Displays: {self.reset_hotkey}"))
+        self.legend.layout().addWidget(QtWidgets.QLabel(f"Move OCR Box: Arrows\nResize: Shift+Arrows"))
+        for i in range(self.legend.layout().count()):
+            self.legend.layout().itemAt(i).widget().setAlignment(Qt.AlignCenter)
+            self.legend.layout().itemAt(i).widget().setStyleSheet("font-size: 20px;")
+
+        self.left_frame.layout().addWidget(self.legend)
+        self.left_frame.layout().addWidget(self.main_display)
+        self.layout().addWidget(self.left_frame, 0, 0)
 
         # create right frame
         self.right_frame = QtWidgets.QFrame(self)
@@ -157,49 +186,73 @@ class VideoWall(QtWidgets.QWidget):
         self.right_frame.layout().setSpacing(0)
         self.layout().addWidget(self.right_frame, 0, 1)
 
+    @pyqtSlot(object)
+    def main_display_update_image(self, screenshot):
+        self.main_display.box = self.camera_id_box
+        self.main_display.update_image(screenshot)
+
+    @pyqtSlot(object)
+    def main_display_update_image_only(self, screenshot):
+        self.main_display.box = self.camera_id_box
+        self.main_display.update_image_only(screenshot)
+
     @pyqtSlot()
     def setup_mini_displays(self):
-        """Set up the mini displays in the right frame. This function is called when a new display is created."""
-        # Clear the layouts and widgets
-        for i in reversed(range(self.right_frame.layout().count())):
-            self.right_frame.layout().itemAt(i).widget().setParent(None)
-
+        """Set up the mini displays in the right frame."""
         if len(self.displays) >= 1:
             # Prune the displays to only show the most updated ones
             self.calc_quantile_span()
-            self.shown_displays = []
+            self.shown_displays_new = []
             keys = sorted(self.displays.keys())
             for key in keys:
-                if self.displays[key].update_span_filt < self.average_span_tolerance * self.average_span:
-                    self.shown_displays.append(key)
+                self.displays[key].update_span_only()
+                if self.displays[key].update_span_filt < np.clip(self.average_span_tolerance * self.average_span, 2, 20):
+                    self.shown_displays_new.append(key)
 
-            if len(self.shown_displays) >= 1:
-                # Calculate the number of rows and columns for the grid layout
-                (width, height), (cols, rows) = best_fit(self.right_shape, (1920, 1080), len(self.shown_displays))
-                widget_width = int(width)
-                widget_height = int(height)
+            if self.shown_displays_new != self.shown_displays:
+                start_time = time.time()
+                self.shown_displays = self.shown_displays_new
 
-                # Create display widgets and add them to the layout
-                for i, key in enumerate(self.shown_displays):
-                    self.displays[key].setFixedSize(widget_width, widget_height)
-                    r = i // cols
-                    c = i % cols
-                    self.right_frame.layout().addWidget(self.displays[key], r, c)
+                # Clear the layouts and widgets
+                for i in reversed(range(self.right_frame.layout().count())):
+                    self.right_frame.layout().itemAt(i).widget().setParent(None)
+                
+                if len(self.shown_displays) >= 1:
+                    # Calculate the number of rows and columns for the grid layout
+                    (width, height), (cols, rows) = best_fit(self.right_shape, (1920, 1080), len(self.shown_displays))
+                    widget_width = int(width)
+                    widget_height = int(height)
 
-                # Update the layout
-                self.right_frame.layout().update()
+                    # Create display widgets and add them to the layout
+                    for i, key in enumerate(self.shown_displays):
+                        self.displays[key].update_image_only()
+                        self.displays[key].setFixedSize(widget_width, widget_height)
+                        r = i // cols
+                        c = i % cols
+                        self.right_frame.layout().addWidget(self.displays[key], r, c)
 
-    @pyqtSlot(str)
-    def create_display(self, display_id):
+                    # Update the layout
+                    self.right_frame.layout().update()
+                print(f"Mini displays set up in {time.time()-start_time:.2f} seconds")
+
+    @pyqtSlot(str, np.ndarray)
+    def create_display(self, display_id, screenshot):
+        start_time = time.time()
         self.displays[display_id] = self.DisplayObject()
         self.displays[display_id].annotations = ['title', 'details']
-        self.setup_mini_displays_signal.emit()
+        self.displays[display_id].title = display_id
+        self.displays[display_id].update_image(screenshot)
+        print(f"New camera found: {display_id}")
+        if self.main_camera_id is None:
+            self.main_camera_id = display_id
+        # self.setup_mini_displays_signal.emit()
+        print(f"Display {display_id} created in {time.time()-start_time:.2f} seconds")
 
     def start_clicks(self):
         if not self.is_clicking:
             self.is_clicking = True
             for key in self.displays:
-                self.displays[key].last_update = time.time() + 1
+                self.displays[key].last_update = time.time() - 1
             self.thread = threading.Thread(target=self.run_clicks)
             self.thread.start()
 
@@ -210,11 +263,21 @@ class VideoWall(QtWidgets.QWidget):
 
     @pyqtSlot()
     def update_mini_displays(self):
+        start_time = time.time()
         for key in self.displays:
             if key == self.main_camera_id:
                 self.displays[key].setStyleSheet("border: 3px solid limegreen;")
             else:
                 self.displays[key].setStyleSheet("border: 1px solid black;")
+        print(f"Mini displays updated in {time.time()-start_time:.2f} seconds")
+
+    @pyqtSlot(str, np.ndarray)
+    def update_single_display(self, display_id, screenshot):
+        start_time = time.time()
+        self.displays[display_id].title = display_id
+        self.displays[display_id].details = f"Latency: {self.displays[display_id].update_span_filt:.2f}"
+        self.displays[display_id].update_image(screenshot)
+        print(f"Display {display_id} updated in {time.time()-start_time:.2f} seconds")
 
     def next_camera(self):
         keys = self.shown_displays
@@ -229,8 +292,12 @@ class VideoWall(QtWidgets.QWidget):
                 index = (index + 1) % len(keys)
             except:
                 index = 0
-            self.main_camera_id = keys[index]
+            try:
+                self.main_camera_id = keys[index]
+            except:
+                print('Error: No cameras to focus on')
             self.update_mini_displays_signal.emit()
+            self.main_display.title = self.main_camera_id
             self.main_display.box = self.camera_id_box
             self.main_display.update_image(self.displays[self.main_camera_id].screenshot)
 
@@ -247,13 +314,20 @@ class VideoWall(QtWidgets.QWidget):
                 index = (index - 1) % len(keys)
             except:
                 index = 0
-            self.main_camera_id = keys[index]
+            try:
+                self.main_camera_id = keys[index]
+            except:
+                print('Error: No cameras to focus on')
             self.update_mini_displays_signal.emit()
+            self.main_display.title = self.main_camera_id
             self.main_display.box = self.camera_id_box
             self.main_display.update_image(self.displays[self.main_camera_id].screenshot)
 
     def move_camera_id_box(self, dx, dy):
         self.camera_id_box = (self.camera_id_box[0] + dx, self.camera_id_box[1] + dy, self.camera_id_box[2], self.camera_id_box[3])
+        if self.main_camera_id is not None:
+            self.main_display.box = self.camera_id_box
+            self.main_display.update_image_only()
 
     def resize_camera_id_box(self, side, dist=1):
         if side == 'up':
@@ -264,12 +338,20 @@ class VideoWall(QtWidgets.QWidget):
             self.camera_id_box = (self.camera_id_box[0] - dist, self.camera_id_box[1], self.camera_id_box[2] + dist, self.camera_id_box[3])
         elif side == 'right':
             self.camera_id_box = (self.camera_id_box[0], self.camera_id_box[1], self.camera_id_box[2] + dist, self.camera_id_box[3])
+        if self.main_camera_id is not None:
+            self.main_display.box = self.camera_id_box
+            self.main_display.update_image_only()
 
     def calc_average_span(self):
         self.average_span = np.mean([self.displays[key].update_span_filt for key in self.displays])
 
     def calc_quantile_span(self, q=0.3):
-        self.average_span = np.quantile([self.displays[key].update_span_filt for key in self.displays], q)
+        spans = [self.displays[key].update_span_filt for key in self.displays]
+        spans = [s for s in spans if s < 10] # remove outliers
+        if len(spans) > 0:
+            self.average_span = np.quantile(spans, q)
+        else:
+            self.average_span = 10
 
     def click(self):
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
@@ -296,35 +378,22 @@ class VideoWall(QtWidgets.QWidget):
                     continue
 
                 # If the camera is not already in the list of displays, add it
-                if self.n_iterations < 1000 and current_id not in self.displays:
-                    self.create_display_signal.emit(current_id)
-                    print(f"New camera found: {current_id}")
-                    if self.main_camera_id is None:
-                        self.main_camera_id = current_id
-                        self.update_mini_displays_signal.emit()
+                if current_id not in self.displays:
+                    self.create_display_signal.emit(current_id, screenshot_np)
+                # Update main display
+                elif current_id == self.main_camera_id:
+                    self.update_main_display_signal.emit(screenshot_np)
+                # Update the main display every 5 iterations
+                elif self.n_iterations % 5 == 0:
+                    self.update_main_display_image_only_signal.emit(None)
 
-                # prune/unprune displays every X iterations
+                # Update mini display
+                if current_id in self.displays:
+                    self.update_single_display_signal.emit(current_id, screenshot_np)
+
+                # Prune/unprune displays every X iterations
                 if self.n_iterations % 30 == 0:
                     self.setup_mini_displays_signal.emit()
-
-                # Convert the screenshot to a QImage and update the relevant display(s)
-                # Main display
-                if current_id == self.main_camera_id:
-                    self.main_display.box = self.camera_id_box
-                    self.main_display.update_image(screenshot_np)
-                elif self.n_iterations % 5 == 0:
-                    self.main_display.box = self.camera_id_box
-                    self.main_display.update_image_only()
-                # Mini display
-                if current_id in self.displays:
-                    # side_screenshot = write_id_to_image(screenshot_np, current_id)
-                    # side_screenshot = write_details_to_image(side_screenshot, f"Latency: {self.displays[current_id].update_span_filt:.2f}")
-                    # self.displays[current_id].update_image(side_screenshot)
-                    self.displays[current_id].title = current_id
-                    self.displays[current_id].details = f"Latency: {self.displays[current_id].update_span_filt:.2f}"
-                    self.displays[current_id].update_image(screenshot_np)
-                else:
-                    print(f"Error: Camera {current_id} not in displays")
 
                 # Perform click, which will progress to the next display
                 self.click()
@@ -335,7 +404,6 @@ class VideoWall(QtWidgets.QWidget):
         self.displays = {}
         self.shown_displays = []
         self.main_camera_id = None
-        self.main_display.setPixmap(QtGui.QPixmap.fromImage(QtGui.QImage(160, 90, QtGui.QImage.Format_RGB888)))
         self.n_iterations = 0
         self.average_span = 10
 
