@@ -34,14 +34,16 @@ def id_from_text(text, typ='int'):
         raise ValueError('Invalid type. Must be "int" or "str".')
 
 
-def screenshot_to_ID(image, typ='int', show=False):
-    return id_from_text(OCR_image(crop_image(image, id_box), show=show), typ=typ)
+def screenshot_to_ID(image, box=id_box, typ='int', show=False):
+    return id_from_text(OCR_image(crop_image(image, box), show=show), typ=typ)
 
 
-def write_id_to_image(image, string, color=(255, 255, 255)):
+def write_id_to_image(image_input, string, color=(255, 255, 255)):
     """Write the string to the image in the upper left."""
-    if isinstance(image, Image.Image):
-        image = np.array(image)
+    if isinstance(image_input, Image.Image):
+        image = np.array(image_input)
+    else:
+        image = image_input.copy()
     text_bot_loc = int(image.shape[0] / 5)
     fscale = image.shape[0] / 150
     line_width = int(image.shape[0] / 50)
@@ -49,10 +51,12 @@ def write_id_to_image(image, string, color=(255, 255, 255)):
     return image
 
 
-def write_details_to_image(image, string, color=(255, 255, 255)):
+def write_details_to_image(image_input, string, color=(255, 255, 255)):
     """Write the string to the image in the lower left."""
-    if isinstance(image, Image.Image):
-        image = np.array(image)
+    if isinstance(image_input, Image.Image):
+        image = np.array(image_input)
+    else:
+        image = image_input.copy()
     text_bot_loc = int(image.shape[0] - image.shape[0] / 6)
     fscale = image.shape[0] / 250
     line_width = int(image.shape[0] / 200)
@@ -60,10 +64,12 @@ def write_details_to_image(image, string, color=(255, 255, 255)):
     return image
 
 
-def write_box_to_image(image, box=id_box, color=(255, 255, 255, 150), line_width=1):
+def write_box_to_image(image_input, box=id_box, color=(255, 255, 255, 150), line_width=1):
     """Write a bounding box onto the image. Box is (x, y, w, h)"""
-    if isinstance(image, Image.Image):
-        image = np.array(image)
+    if isinstance(image_input, Image.Image):
+        image = np.array(image_input)
+    else:
+        image = image_input.copy()
     x, y, w, h = box
     cv2.rectangle(image, (x, y), (x+w, y+h), color, line_width)
     return image
@@ -90,7 +96,6 @@ if __name__ == "__main__":
 
     image = cv2.imread("tests/examples/camera_45.png")
     image = write_details_to_image(image, 'mean latency: 3.1123123')
-    # show image scaled by 0.5
     cv2.imshow('details image', cv2.resize(image, (0, 0), fx=0.5, fy=0.5))
     cv2.waitKey(0)
     cv2.destroyAllWindows()
