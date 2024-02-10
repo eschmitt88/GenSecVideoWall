@@ -10,13 +10,14 @@ from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import Qt, pyqtSignal, QMetaObject, pyqtSlot, QTimer, QObject, QCoreApplication
 import win32con
 import win32api
-from src.camera_id import screenshot_to_ID, write_id_to_image, write_details_to_image, write_box_to_image
-from src.camera_id import id_box as camera_id_box
+from src.camera_id import screenshot_to_ID, write_id_to_image, write_details_to_image, write_box_to_image, save_id_box_to_config, load_id_box_from_config
+from src.camera_id import default_id_box as camera_id_box
 from src.utils.FlowLayout import FlowLayout
 from src.utils.best_fit import best_fit
 import numpy as np
 from utils.screenshot import screenshot_background_window as get_screenshot
 
+config_file = 'src/../config.json'
 
 class VideoWall(QtWidgets.QWidget):
     create_display_signal = pyqtSignal(str, np.ndarray)
@@ -121,7 +122,11 @@ class VideoWall(QtWidgets.QWidget):
         keyboard.add_hotkey(self.reset_hotkey, self.reset)
 
         # hotkeys for moving and resizing the camera_id_box
-        self.camera_id_box = camera_id_box
+        try:
+            self.camera_id_box = load_id_box_from_config('config.json')
+        except:
+            self.camera_id_box = camera_id_box
+            save_id_box_to_config(self.camera_id_box, config_file)
         keyboard.add_hotkey('up', self.move_camera_id_box, args=(0, -1))
         keyboard.add_hotkey('down', self.move_camera_id_box, args=(0, 1))
         keyboard.add_hotkey('left', self.move_camera_id_box, args=(-1, 0))
@@ -329,6 +334,7 @@ class VideoWall(QtWidgets.QWidget):
         if self.main_display is not None:
             self.main_display.box = self.camera_id_box
             self.main_display.update_image_only()
+        save_id_box_to_config(self.camera_id_box, config_file)
 
     def resize_camera_id_box(self, side, dist=1):
         if side == 'up':
@@ -342,6 +348,9 @@ class VideoWall(QtWidgets.QWidget):
         if self.main_display is not None:
             self.main_display.box = self.camera_id_box
             self.main_display.update_image_only()
+        start_time = time.time()
+        save_id_box_to_config(self.camera_id_box, config_file)
+        print(f"Resized camera_id_box in {time.time()-start_time:.2f} seconds")
 
     def calc_average_span(self):
         self.average_span = np.mean([self.displays[key].update_span_filt for key in self.displays])
