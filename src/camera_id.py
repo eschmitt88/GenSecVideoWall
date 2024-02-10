@@ -3,9 +3,29 @@ from PIL import Image
 from tesserocr import PyTessBaseAPI
 import time
 import numpy as np
+import json
+import os
 
 tesser_api = PyTessBaseAPI(path='resources/tessdata', lang='eng', psm=6, oem=3)
-id_box = (215, 1028, 50, 43)
+default_id_box = (215, 1028, 50, 43)
+
+
+def load_id_box_from_config(file='config.json'):
+    with open(file, 'r') as f:
+        data = json.load(f)
+    return data['id_box']
+
+
+def save_id_box_to_config(box, file='config.json'):
+    if not os.path.exists(file):
+        with open(file, 'w') as f:
+            json.dump({'id_box': box}, f)
+    else:
+        with open(file, 'r') as f:
+            data = json.load(f)
+        data['id_box'] = box
+        with open(file, 'w') as f:
+            json.dump(data, f)
 
 
 def crop_image(image, box):
@@ -34,7 +54,7 @@ def id_from_text(text, typ='int'):
         raise ValueError('Invalid type. Must be "int" or "str".')
 
 
-def screenshot_to_ID(image, box=id_box, typ='int', show=False):
+def screenshot_to_ID(image, box=default_id_box, typ='int', show=False):
     return id_from_text(OCR_image(crop_image(image, box), show=show), typ=typ)
 
 
@@ -64,7 +84,7 @@ def write_details_to_image(image_input, string, color=(255, 255, 255)):
     return image
 
 
-def write_box_to_image(image_input, box=id_box, color=(255, 255, 255, 150), line_width=1):
+def write_box_to_image(image_input, box=default_id_box, color=(255, 255, 255, 255), line_width=1):
     """Write a bounding box onto the image. Box is (x, y, w, h)"""
     if isinstance(image_input, Image.Image):
         image = np.array(image_input)
@@ -89,7 +109,7 @@ if __name__ == "__main__":
     cv2.destroyAllWindows()
 
     image = cv2.imread("tests/examples/camera_45.png")
-    image = write_box_to_image(image)
+    image = write_box_to_image(image, color=(0, 0, 255, 255))
     cv2.imshow('boxed image', cv2.resize(image, (0, 0), fx=0.5, fy=0.5))
     cv2.waitKey(0)
     cv2.destroyAllWindows()
