@@ -8,7 +8,7 @@ This application is a Python-based project that uses the PyQt5 GUI. It creates a
 
 How to Run
 ----------
-To run this application, you need to have Python 11 with the libraries mentioned in requirements.txt. See the [requirements](#requirements.txt) file for more information.
+To run this application, you need to have Python 3.11 with the libraries mentioned in requirements.txt. See the [requirements](#requirements.txt) file for more information.
 
 The following hotkeys are used to control the application:
 - "[": start clicking (press once you are in the camera feed)
