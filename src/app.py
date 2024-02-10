@@ -196,6 +196,17 @@ class VideoWall(QtWidgets.QWidget):
         self.main_display.box = self.camera_id_box
         self.main_display.update_image_only(screenshot)
 
+    @pyqtSlot(str, np.ndarray)
+    def create_display(self, display_id, screenshot):
+        self.displays[display_id] = self.DisplayObject()
+        self.displays[display_id].annotations = ['title', 'details']
+        self.displays[display_id].title = display_id
+        self.displays[display_id].update_image(screenshot)
+        print(f"New camera found: {display_id}")
+        if self.main_camera_id is None:
+            self.main_camera_id = display_id
+            self.main_display.title = display_id
+
     @pyqtSlot()
     def setup_mini_displays(self):
         """Set up the mini displays in the right frame."""
@@ -206,7 +217,7 @@ class VideoWall(QtWidgets.QWidget):
             keys = sorted(self.displays.keys())
             for key in keys:
                 self.displays[key].update_span_only()
-                if self.displays[key].update_span_filt < np.clip(self.average_span_tolerance * self.average_span, 2, 20):
+                if self.displays[key].update_span_filt < np.clip(self.average_span_tolerance * self.average_span, 1.5, 20):
                     self.shown_displays_new.append(key)
 
             if self.shown_displays_new != self.shown_displays:
@@ -235,31 +246,10 @@ class VideoWall(QtWidgets.QWidget):
                     self.right_frame.layout().update()
                 print(f"Mini displays set up in {time.time()-start_time:.2f} seconds")
 
-    @pyqtSlot(str, np.ndarray)
-    def create_display(self, display_id, screenshot):
-        start_time = time.time()
-        self.displays[display_id] = self.DisplayObject()
-        self.displays[display_id].annotations = ['title', 'details']
-        self.displays[display_id].title = display_id
-        self.displays[display_id].update_image(screenshot)
-        print(f"New camera found: {display_id}")
-        if self.main_camera_id is None:
-            self.main_camera_id = display_id
-        # self.setup_mini_displays_signal.emit()
-        print(f"Display {display_id} created in {time.time()-start_time:.2f} seconds")
-
-    def start_clicks(self):
-        if not self.is_clicking:
-            self.is_clicking = True
-            for key in self.displays:
-                self.displays[key].last_update = time.time() - 1
-            self.thread = threading.Thread(target=self.run_clicks)
-            self.thread.start()
-
-    def stop_clicks(self):
-        if self.is_clicking:
-            self.is_clicking = False
-            self.thread.join()
+        else:
+            # Clear the layouts and widgets
+            for i in reversed(range(self.right_frame.layout().count())):
+                self.right_frame.layout().itemAt(i).widget().setParent(None)
 
     @pyqtSlot()
     def update_mini_displays(self):
@@ -273,11 +263,22 @@ class VideoWall(QtWidgets.QWidget):
 
     @pyqtSlot(str, np.ndarray)
     def update_single_display(self, display_id, screenshot):
-        start_time = time.time()
         self.displays[display_id].title = display_id
         self.displays[display_id].details = f"Latency: {self.displays[display_id].update_span_filt:.2f}"
         self.displays[display_id].update_image(screenshot)
-        print(f"Display {display_id} updated in {time.time()-start_time:.2f} seconds")
+
+    def start_clicks(self):
+        if not self.is_clicking:
+            self.is_clicking = True
+            for key in self.displays:
+                self.displays[key].last_update = time.time() - 1
+            self.thread = threading.Thread(target=self.run_clicks)
+            self.thread.start()
+
+    def stop_clicks(self):
+        if self.is_clicking:
+            self.is_clicking = False
+            self.thread.join()
 
     def next_camera(self):
         keys = self.shown_displays
@@ -325,7 +326,7 @@ class VideoWall(QtWidgets.QWidget):
 
     def move_camera_id_box(self, dx, dy):
         self.camera_id_box = (self.camera_id_box[0] + dx, self.camera_id_box[1] + dy, self.camera_id_box[2], self.camera_id_box[3])
-        if self.main_camera_id is not None:
+        if self.main_display is not None:
             self.main_display.box = self.camera_id_box
             self.main_display.update_image_only()
 
@@ -338,7 +339,7 @@ class VideoWall(QtWidgets.QWidget):
             self.camera_id_box = (self.camera_id_box[0] - dist, self.camera_id_box[1], self.camera_id_box[2] + dist, self.camera_id_box[3])
         elif side == 'right':
             self.camera_id_box = (self.camera_id_box[0], self.camera_id_box[1], self.camera_id_box[2] + dist, self.camera_id_box[3])
-        if self.main_camera_id is not None:
+        if self.main_display is not None:
             self.main_display.box = self.camera_id_box
             self.main_display.update_image_only()
 
@@ -394,6 +395,7 @@ class VideoWall(QtWidgets.QWidget):
                 # Prune/unprune displays every X iterations
                 if self.n_iterations % 30 == 0:
                     self.setup_mini_displays_signal.emit()
+                    self.update_mini_displays_signal.emit()
 
                 # Perform click, which will progress to the next display
                 self.click()
@@ -406,6 +408,7 @@ class VideoWall(QtWidgets.QWidget):
         self.main_camera_id = None
         self.n_iterations = 0
         self.average_span = 10
+        self.setup_mini_displays_signal.emit()
 
 
 def main():
