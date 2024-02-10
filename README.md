@@ -1,4 +1,6 @@
-# ![logo](assets/GenSec.png)
+<div style="text-align: center;">
+    <img src="assets/GenSec.png" alt="Logo" width="350"/>
+</div>
 
 GenSec Video Wall
 ====================
