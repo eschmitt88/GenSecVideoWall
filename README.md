@@ -6,6 +6,8 @@ GenSec Video Wall
 ====================
 This application is a Python-based project that uses the PyQt5 GUI. It creates a video wall that displays the live feed from a Payday 2 in-game camera feed. By clicking rapidly through the camera feed, all guards will be highlighted in red, making it easier for teammates to spot them. While rapidly clicking through the camera feed, your screen will be a complete blur, so this application creates a video wall that parses out the images between clicks and displays the individual feeds in a grid. One of the video feeds is enlarged so as to be useful for the player, while the rest of the feeds are smaller.
 
+OCR is used to identify the camera from each screenshot and a running list of recently seen camera IDs is used to auto-populate the grid. Random OCR errors can occur, and so only camera IDs that are regularly seen will be displayed.
+
 How to Run
 ----------
 To run this application, you need to have Python 3.11 with the libraries mentioned in requirements.txt. See the [requirements](#requirements.txt) file for more information.
